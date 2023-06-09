@@ -1,48 +1,73 @@
-function [A_thresh,thresh] = perc_thresh(A)
-%PERC_THRESH Generates a matrix at the percolation threshold of A.
+function [A_thresh, thresh] = perc_thresh(A)
+% perc_thresh Generates a matrix at the percolation threshold of A..
 %   The percolation threshold is the minimal fully connected graph of
 %   matrix A. All weakest links below the threshold are removed. Removing
 %   the link at the threshold will result in a disconnected graph.
 %
 %   This function returns a thresholded matrix (A_thresh) and optionally
 %   returns the threshold weight (thresh) used.
-%   Written by Benjamin Sipes at UCSF, 2022.
+%   Written by Benjamin Sipes at UCSF, 2022; updated 2023.
+% 
+%   Update: Now implements an algorithm with a base-2 search for the
+%   percolation threshold, resulting in ~6000X speeed-up. Niceee
 %
 %   Note:
 %   This function uses the get_components function (below) from the
 %   Brain Connectivity Toolbox. All credit for that function goes to it's
 %   creators. I have made no modifications to that function.
 %   For it's documentation-- https://sites.google.com/site/bctnet/
+% 
+%   Usage: [A_thresh, thresh] = perc_thresh(A)
 
 
-A(isnan(A)) = 0; %remove all nans
-A = double(A);
-for i = 1:size(A,1), A(i,i) = 0; end %zero the diagonal
+    % Prepare Matrix:
+    A(isnan(A)) = 0;
+    A = double(A);
+    n = size(A,1);
+    A = A.*~eye(n); % Set diagonal elements to zero
+    A_orig = A;
+    degrees = sum(A);
+    A(:,find(degrees==0)) = [];
+    A(find(degrees==0),:) = [];
+    A = double(A);
 
-% Get number of components of A
+    
+    A_edges = sort(abs(nonzeros(triu(A,1))));
 
-C = max(get_components(A));
+    n_edges = length(A_edges);
+    next_power_of_2 = 2^ceil(log2(abs(n_edges)));
+    
+    A_edges = cat(1, zeros((next_power_of_2 - n_edges),1), A_edges);
+    
 
-A_thresh = A;
+    while length(A_edges)>1
 
-while C==1
+        % Update the threshold:
+        thresh = A_edges(length(A_edges)/2);
 
+        A_thresh = A .* (abs(A) > thresh); % Vectorized thresholding
 
-    %Threshold minimum weight:
-    thresh = min(abs(nonzeros(A_thresh)),[],'all');
-    A_thresh(abs(A)<=thresh) = 0;
+        % Obtain number of components in graph
+        C = max(get_components(A_thresh));
 
-    %Obtain number of components in graph
-    C = max(get_components(A_thresh));
-%     disp(thresh);
+        if C > 1 %the graph is disconnected...
+            % Get rid of all stronger edges than the threshold
+            A_edges( A_edges > thresh ) = [];
+
+        else %the graph is still connected...
+            % Get rid of all weaker edges than the threshold
+            A_edges( A_edges <= thresh ) = [];
+        end
+
+    end
+
+    thresh = A_edges;
+
+    % Final thresholding
+    A_thresh = A_orig .* (abs(A_orig) >= thresh); % Vectorized thresholding
 
 end
 
-%Final thresholding
-A_thresh = A;
-A_thresh(abs(A)<(thresh+eps)) = 0; %note this is < and not <= as above.
-
-end
 
 function [comps,comp_sizes] = get_components(adj)
 % GET_COMPONENTS        Connected components
